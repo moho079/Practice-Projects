@@ -1,0 +1,147 @@
+from pygame import *
+import sys
+import math
+import random
+
+meter_per_pixel = 1e7
+Gravity_Constant = 6.67430e-10
+
+class Central_Mass():
+    def __init__(self , Mass , position , FPS , color , radius):
+        self.dt = 1 / FPS
+        self.mass = Mass
+        self.position = position
+        self.color = color
+        self.radius = radius
+    
+    def draw_mass(self, screen):
+        draw.circle(screen , self.color , (int(self.position.x), int(self.position.y)) ,self.radius)
+    
+    @staticmethod
+    def find_distance_slope(first_position , second_position):
+        dy = first_position.y - second_position.y 
+        dx = first_position.x - second_position.x 
+        distance = math.sqrt(dx*dx + dy*dy) * meter_per_pixel
+        dx_dy = Vector2(dx, dy)
+        return distance , dx_dy
+
+    @staticmethod
+    def find_angle(slope):
+        # slope is a Vector2
+        return math.degrees(math.atan2(slope.y, slope.x))
+
+class Planet(Central_Mass):
+    def __init__(self, Mass, FPS , color, planet_radius, start_position , planet_position):
+        super().__init__(Mass, planet_position, FPS , color  , planet_radius )
+        self.start_position = start_position
+        # Velocity initialization: 
+        # Let's take initial velocity from vector start->planet_position (like a slingshot)
+        distance, slope = Central_Mass.find_distance_slope(start_position, planet_position)
+        angle = Central_Mass.find_angle(slope)
+        
+        # For simplicity, initial velocity magnitude proportional to distance (you can tune this)
+        velocity_magnitude = (distance) / meter_per_pixel  # arbitrary initial speed in m/s, tune as needed
+        vx = velocity_magnitude * math.cos(math.radians(angle))
+        vy = velocity_magnitude * math.sin(math.radians(angle))
+        self.velocity = Vector2(vx, vy)
+        self.mass = Mass
+        self.FPS = FPS
+        self.dt = 1 / FPS
+
+    @staticmethod
+    def draw_place_holder(screen , color , position , radius):
+        draw.circle(screen , color , (int(position.x), int(position.y)), radius)
+
+    def draw_planet(self, screen):
+        draw.circle(screen, self.color, (int(self.position.x), int(self.position.y)), self.radius)
+
+    def update(self, central_mass):
+        # Calculate gravitational pull force vector from central mass
+        distance, slope = Central_Mass.find_distance_slope(central_mass.position, self.position)
+        """if distance == 0:
+            return  # avoid division by zero"""
+        
+        # Force magnitude
+        force_mag = Gravity_Constant * (central_mass.mass * self.mass) / (distance**2)
+        # Force direction is slope normalized (vector from planet to center mass)
+        force_dir = Central_Mass.find_angle(slope)
+        # Force vector (in newtons)
+        force_vec = Vector2(math.cos(math.radians(force_dir)), math.sin(math.radians(force_dir))) * force_mag
+        
+        # Acceleration = Force / mass
+        acceleration = force_vec / self.mass
+        
+        # Update velocity and position with Euler integration
+        self.velocity += acceleration * self.dt
+        self.position += self.velocity * self.dt
+
+init()
+
+WIDTH = 1200
+HEIGHT = 800
+FPS = 400
+BACKGROUND_IMAGE = image.load("background.jpg")
+BACKGROUND_POSITION = BACKGROUND_IMAGE.get_rect(center=(WIDTH / 2, HEIGHT / 2))
+BACKGROUND_IMAGE = transform.scale(BACKGROUND_IMAGE, (WIDTH, HEIGHT))
+screen = display.set_mode((WIDTH, HEIGHT))
+display.set_caption("Planets In Space")
+
+cm_position = Vector2(WIDTH / 2, HEIGHT / 2)
+cm_mass = 1.989e30  # kg
+cm_color = (255, 255, 0)
+cm_radius = 50 
+cm = Central_Mass(cm_mass , cm_position , FPS , cm_color , cm_radius)
+
+Planet_mass = 5.97e22 # kg
+planet_radius = 20
+
+Planets = []
+clock = time.Clock()
+
+start_position = None
+
+ubound = 0 + planet_radius
+dbound = HEIGHT - planet_radius
+lbound = 0 + planet_radius
+rbound = WIDTH - planet_radius 
+
+while True:
+    press = mouse.get_pressed()
+    for events in event.get():
+        if events.type == QUIT:
+            quit()
+            sys.exit()
+        mouse_pos = Vector2(mouse.get_pos())
+        clamped_x = max(lbound, min(mouse_pos.x , rbound))
+        clamped_y = max(ubound, min(mouse_pos.y , dbound))
+        clamped_pos = Vector2(clamped_x, clamped_y)
+        if events.type == MOUSEBUTTONDOWN and events.button == 1:
+            start_position = Vector2(mouse.get_pos())
+        elif events.type == MOUSEBUTTONUP and events.button == 1 and start_position is not None:
+            end_position = clamped_pos
+            planet_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+            new_planet = Planet(Mass=Planet_mass, FPS=FPS, color=planet_color, planet_radius=planet_radius,  
+                                start_position=start_position, planet_position=end_position)
+            Planets.append(new_planet)
+            start_position = None
+
+    screen.blit(BACKGROUND_IMAGE, BACKGROUND_POSITION)
+
+    if press[0] and start_position is not None:
+        draw.line(screen, (255, 255, 255), (int(start_position.x), int(start_position.y)), (int(clamped_pos.x), int(clamped_pos.y)), 3)
+        Planet.draw_place_holder(screen, (255, 255, 255), clamped_pos, planet_radius)
+
+    for planet in Planets[:]:  # copy list to avoid modification during iteration
+        planet.update(cm)
+        planet.draw_planet(screen)
+        #Remove planet if off screen
+        if planet.position.x < 0 - planet.radius or planet.position.x > WIDTH + planet.radius or planet.position.y < 0 - planet.radius or planet.position.y > HEIGHT + planet.radius:
+           Planets.remove(planet)
+        distance_to_sun = planet.position.distance_to(cm.position)
+        if distance_to_sun <= planet.radius + cm.radius:
+            Planets.remove(planet)
+
+    cm.draw_mass(screen)
+
+    display.flip()
+    clock.tick(FPS)
